@@ -1,1 +1,27 @@
 /.lake
+# Lean build output
+leanpkg.path
+leanpkg.toml.lock
+
+# build artifacts
+build/
+bin/
+
+# Lean 4 lake build cache and artifacts
+.lean/
+lakefile.lock
+lakefile.toml.lock
+
+# VSCode or editor stuff
+.vscode/
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# Emacs backup files
+*~
+.#*
+
+# Misc
+.DS_Store
