@@ -1,393 +1,693 @@
-import TaplLean.Util
-
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.Finset.Card
-
+import Mathlib.Logic.Relation
 
 open Std
+open Relation
 
-namespace UArith
+/-
+Formalizing the untyped arithmetic language introduced in 3.1
+-/
+namespace UntypedArith
 
+/-
+t ::=
+      true
+      false
+      if t then t else t
+      0
+      succ t
+      pred t
+      is_zero t
+
+This defines the terms of the language.
+-/
 inductive Term where
-| true : Term
-| false : Term
-| ite : Term → Term → Term → Term
-| zero : Term
-| succ : Term → Term
-| pred : Term → Term
-| is_zero : Term → Term
+  | true
+  | false
+  | zero
+  | succ : Term -> Term
+  | pred : Term -> Term
+  | is_zero : Term -> Term
+  | ite : Term -> Term -> Term -> Term
 deriving Repr, DecidableEq
 
 /-
 Definition 3.2.1
-Following relation defines the set of terms T of the language Term
+We then define inductively T, which is the set
+of all terms in the language.
+
+- true, false, 0 ∈ T
+- if t ∈ T then succ t, pred t, is_zero t ∈ T
+- if t₁, t₂, t₃ ∈ T then if t₁ then t₂ else t₃ ∈ T
 -/
 inductive InT : Term -> Prop where
-| true : InT Term.true
-| false : InT Term.false
-| ite (t1 t2 t3 : Term): InT t1 -> InT t2 -> InT t3 -> InT (Term.ite t1 t2 t3)
-| zero : InT Term.zero
-| succ {t} : InT t -> InT (Term.succ t)
-| pred {t} : InT t -> InT (Term.pred t)
-| is_zero {t} : InT t -> InT (Term.is_zero t)
+  | true : InT Term.true
+  | false : InT Term.false
+  | zero : InT Term.zero
+  | succ {t : Term} (H : InT t) : InT (Term.succ t)
+  | pred {t : Term} (H : InT t) : InT (Term.pred t)
+  | is_zero {t : Term} (H : InT t) : InT (Term.is_zero t)
+  | ite {t₁ t₂ t₃ : Term}
+        (H₁ : InT t₁) (H₂ : InT t₂) (H₃ : InT t₃) : InT (Term.ite t₁ t₂ t₃)
 
 /- Definition 3.2.3
-  Step Indexed Relation
-  S_0 = ∅ is vacuously false because we cannot construct S 0,
-  or construct the proof that any t ∈ S_0
+We can also define the set of all terms differently, building terms
+level by level. We call this set S[n], where n is the level.
 
-  S i t means the same as t ∈ S_i
+- S[0] = ∅
+- S[i+1] = {true, false, zero}
+           ∪ {succ t, pred t, is_zero t | t ∈ S[i]}
+           ∪ {if t₁ then t₂ else t₃ | t₁, t₂, t₃ ∈ S[i]}
+Finally we can define S.
+
+- S = ⋃ S[i]
 -/
-inductive S : Nat → Term → Prop
-  | true {i} : S (i + 1) Term.true
-  | false {i} : S (i + 1) Term.false
-  | zero {i} : S (i + 1) Term.zero
-  | succ {i} {t} : S i t → S (i + 1) (Term.succ t)
-  | pred {i} {t} : S i t → S (i + 1) (Term.pred t)
-  | is_zero {i} {t} : S i t → S (i + 1) (Term.is_zero t)
-  | ite {i} (t1 t2 t3) : S i t1 → S i t2 → S i t3 → S (i + 1) (Term.ite t1 t2 t3)
 
+inductive InSi : Nat -> Term -> Prop where
+  | true {i} : InSi (i + 1) Term.true
+  | false {i} : InSi (i + 1) Term.false
+  | zero {i} : InSi (i + 1) Term.zero
+  | succ {i t} (H : InSi i t) : InSi (i + 1) (Term.succ t)
+  | pred {i t} (H : InSi i t) : InSi (i + 1) (Term.pred t)
+  | is_zero {i t} (H : InSi i t) : InSi (i + 1) (Term.is_zero t)
+  | ite {i t₁ t₂ t₃}
+        (H₁ : InSi i t₁) (H₂ : InSi i t₂) (H₃ : InSi i t₃) :
+        InSi (i + 1) (Term.ite t₁ t₂ t₃)
 
-def S_u (t : Term) : Prop := ∃ i, S i t
+def InS (t : Term) : Prop :=
+  ∃ i, InSi i t
 
-/- Exercise 3.2.5
-  S_i ∈ S_i+1
+/-
+Exercise 3.2.5
+Show that S[i] are cummulative, i.e. S[i] ⊆ S[i+1] for all i.
 -/
--- curly braces make these values implicit. Lean ill derive from other arguments
-theorem S_is_cummulative {i t} (h : S i t) : S (i + 1) t := by
-  induction h with
-  | true => apply S.true
-  | false => apply S.false
-  | zero => apply S.zero
-  | succ _ IHsucc => apply S.succ IHsucc
-  | pred _ IHpred => apply S.pred IHpred
-  | is_zero _ IHis_zero => apply S.is_zero IHis_zero
-  | ite t1 t2 t3 _ _ _ IH1 IH2 IH3 =>
-    apply S.ite
-    · assumption
-    · assumption
-    · assumption
-  -- | ite _ _ _ ih1 ih2 ih3 => apply S.ite ih1 ih2 ih3
-
-#print Nat.le
-/- A stronger restating of the previous theorem -/
-theorem S_monotonic {i j t} (h: S i t) (H: i ≤ j) : S j t := by
+theorem InSi.cummulative {i t} (H : InSi i t) : InSi (i + 1) t := by
   induction H with
+  | true => apply InSi.true
+  | false => apply InSi.false
+  | zero => apply InSi.zero
+  | succ H IH =>
+    apply InSi.succ
+    assumption
+  | pred H IH =>
+    apply InSi.pred
+    assumption
+  | is_zero H IH =>
+    apply InSi.is_zero
+    assumption
+  | ite H₁ H₂ H₃ IH₁ IH₂ IH₃ =>
+    apply InSi.ite <;> assumption
+
+/-
+We can also prove a more stronger version of the same theorem
+
+∀ i j t, if i <= j and t ∈ S[i]:
+  t ∈ S[j]
+-/
+theorem InSi.monotone {i j t} (H : InSi i t) (Hle : i <= j) : InSi j t := by
+  induction Hle with
   | refl => assumption
-  | step k Ihk =>
-    apply S_is_cummulative
+  | step Hle IH =>
+    apply InSi.cummulative
     assumption
 
-/- Proposition 3.2.6
-   T = S
--/
+/-
+Proposition 3.2.6
+T = S
 
-theorem T_eq_S (t : Term) : InT t ↔ S_u t := by
-  simp [S_u]
-  apply Iff.intro
-  -- forward direction
-  · intro H
+My proof is different from the book's proof.
+-/
+theorem InT.eq_InS {t} : InT t <-> InS t := by
+  simp[InS]
+  constructor <;> intro H
+  -- t ∈ T -> t ∈ S
+  · -- Proof follows by induction.
+    -- For each case we must find an i such that t ∈ S[i]
     induction H with
-    | true => exact ⟨1, S.true⟩
-    | false => exact ⟨1, S.false⟩
-    | zero => exact ⟨1, S.zero⟩
-    | succ t Ih =>
-      obtain ⟨i, Hs⟩ := Ih
+    -- true, false, 0 are members of S[1] by definition
+    | true =>
+      exists 1
+      apply InSi.true
+    | false =>
+      exists 1
+      apply InSi.false
+    | zero =>
+      exists 1
+      apply InSi.zero
+    | succ H IH => -- we know that there exists i such that H ∈ S[i]
+      -- so we can use the same i + 1
+      obtain ⟨i, IH⟩ := IH
       exists (i + 1)
-      apply S.succ
+      apply InSi.succ
       assumption
-      -- the previous 3 lines are equivalent to
-      -- exact ⟨i + 1, S.succ Hs⟩ OR
-    | pred t Ih =>
-      obtain ⟨i, Hs⟩ := Ih
-      exact ⟨i + 1, S.pred Hs⟩
-    | is_zero t Ih =>
-      obtain ⟨i, Hs⟩ := Ih
-      exact ⟨i + 1, S.is_zero Hs⟩
-    | ite t1 t2 t3 H1 H2 H3 IH1 IH2 IH3 =>
-      obtain ⟨i1, IH1⟩ := IH1
-      obtain ⟨i2, IH2⟩ := IH2
-      obtain ⟨i3, IH3⟩ := IH3
-      /- we need to construct an i such that
-         t1, t2, t3 ∈ S_i
-         this is simple, we just take the max of i1, i2 and i3
-         and because we know that if i <= j then S_i ⊆ S_j
-         then this becomes true -/
-      -- So now we prove i1, i2, i3 ≤ max(i1, i2, i3)
-      have Hmax3 : i3 ≤ max (max i1 i2) i3 := by
-        apply Nat.le_max_right
-      have Hmax : max i1 i2 ≤ max (max i1 i2) i3 := by
-        apply Nat.le_max_left
-      have Hmax1 : i1 ≤ max (max i1 i2) i3 := by
-        apply Nat.le_trans ?_ -- could also specify (m := max i1 i2)
-        · apply Hmax
-        · apply Nat.le_max_left
-      have Hmax2 : i2 ≤ max (max i1 i2) i3 := by
-        apply Nat.le_trans ?_
-        · apply Hmax
-        · apply Nat.le_max_right
-      let i := max (max i1 i2) i3
-      exists i + 1
-      apply S.ite
-      · apply S_monotonic IH1 Hmax1
-      · apply S_monotonic IH2 Hmax2
-      · apply S_monotonic IH3 Hmax3
-  -- backwards
-  · intro H
-    obtain ⟨i, H⟩ := H
-    induction H with
-    | true => apply InT.true
-    | false => apply InT.false
-    | zero => apply InT.zero
-    | succ H IH =>
-      apply InT.succ
-      assumption
+    -- pred and zero are similar
     | pred H IH =>
-      apply InT.pred
+      obtain ⟨i, IH⟩ := IH
+      exists (i + 1)
+      apply InSi.pred
       assumption
     | is_zero H IH =>
-      apply InT.is_zero
+      obtain ⟨i, IH⟩ := IH
+      exists (i + 1)
+      apply InSi.is_zero
       assumption
-    | ite t1 t2 t3 H1 H2 H3 IH1 IH2 IH3 =>
-      apply InT.ite
-      · assumption
-      · assumption
-      · assumption
+    | ite H₁ H₂ H₃ IH₁ IH₂ IH₃ => -- this proof is tricky
+      obtain ⟨i₁, IH₁⟩ := IH₁
+      obtain ⟨i₂, IH₂⟩ := IH₂
+      obtain ⟨i₃, IH₃⟩ := IH₃
+      -- we need to construct i such that t₁, t₂, t₃ ∈ S[i]
+      -- we also know InSi.monotone
+      -- so we the i we need is max(i₁, i₂, i₃)
+      let i := max (max i₁ i₂) i₃
+      exists (i + 1)
+      -- now we need to prove that i₁, i₁, i₂ ≤ i
+      -- this will emable us to use InSi.monotone
+      have H₁le : i₁ ≤ i := by
+        apply Nat.le_trans (m := max i₁ i₂)
+        · apply Nat.le_max_left
+        · apply Nat.le_max_left
+      have H₂le : i₂ ≤ i := by
+        apply Nat.le_trans (m := max i₁ i₂)
+        · apply Nat.le_max_right
+        · apply Nat.le_max_left
+      have H₃le : i₃ ≤ i := by
+        apply Nat.le_max_right
+      apply InSi.ite <;> apply InSi.monotone <;> assumption
+  -- t ∈ S -> t ∈ T
+  · -- Proof follows by induction.
+    obtain ⟨i, H⟩ := H
+    induction H with
+    -- true, false, zero ∈ T by defintion of T
+    | true | false | zero => constructor
+    | succ | pred | is_zero => constructor; assumption
+    | ite => constructor <;> assumption
 
-/- Definition 3.3.1 -/
-inductive Const
-  | true
-  | false
-  | zero
-deriving DecidableEq, Repr
+/-
+Definition 3.3.1
 
-def consts : Term → Finset Const
-  | Term.true => {Const.true}
-  | Term.false => {Const.false}
-  | Term.zero => {Const.zero}
-  | Term.succ t => consts t
-  | Term.pred t => consts t
-  | Term.is_zero t => consts t
-  | Term.ite t1 t2 t3 =>
-    consts t1 ∪ consts t2 ∪ consts t3
+Here we define Const(t), which is the set of all constant terms
+appearing in the term t.
+-/
 
-def size : Term → Nat
+def Const (t : Term) : Finset Term :=
+  match t with
+  | Term.true => {Term.true}
+  | Term.false => {Term.false}
+  | Term.zero => {Term.zero}
+  | Term.succ t => Const t
+  | Term.pred t => Const t
+  | Term.is_zero t => Const t
+  | Term.ite t₁ t₂ t₃ =>
+    (Const t₁) ∪ (Const t₂) ∪ (Const t₃)
+
+/-
+Definition 3.3.2
+
+We can also define the size(t), which is the size of the term t.
+-/
+
+def size (t : Term) : Nat :=
+  match t with
   | Term.true => 1
   | Term.false => 1
   | Term.zero => 1
   | Term.succ t => size t + 1
   | Term.pred t => size t + 1
   | Term.is_zero t => size t + 1
-  | Term.ite t1 t2 t3 => size t1 + size t2 + size t3 + 1
+  | Term.ite t₁ t₂ t₃ =>
+    size t₁ + size t₂ + size t₃ + 1
 
-/- Lemma 3.3.3
-   |consts t| ≤ size t
+/-
+Definition 3.3.2
+
+We can also define depth(t), which is the depth of the term t.
 -/
-lemma consts_le_size (t : Term) : Finset.card (consts t) ≤ size t := by
+
+def depth (t : Term) : Nat :=
+  match t with
+  | Term.true => 1
+  | Term.false => 1
+  | Term.zero => 1
+  | Term.succ t => depth t + 1
+  | Term.pred t => depth t + 1
+  | Term.is_zero t => depth t + 1
+  | Term.ite t₁ t₂ t₃ =>
+    max (max (depth t₁) (depth t₂)) (depth t₃) + 1
+
+/-
+We can connect the depth of a term with the set S[i] it belongs to.
+depth(t) is the smallest i such that t ∈ S[i].
+
+To prove this we must prove that
+- t ∈ S[depth(t)]
+- ∀ i, if t ∈ S[i] then depth(t) ≤ i
+This is a two-part proof, so we will prove each part separately.
+-/
+theorem InSi.indexed (t : Term) : InSi (depth t) t := by
+  -- both InSi and depth are inductive on t
+  -- so proceed by induction on t
   induction t with
-  | true | false | zero => simp [consts, size]
-  | succ | pred | is_zero =>
-    simp [consts, size]
-    apply Nat.le_succ_of_le
-    assumption
-  | ite t1 t2 t3 IH1 IH2 IH3 =>
-    simp [consts, size]
-    apply Nat.le_succ_of_le
-    apply Nat.le_trans
-    · apply Finset.card_union_le
-    rw [Nat.add_assoc]
-    apply Nat.add_le_add
+  | true | false | zero => simp [depth]; constructor
+  | succ | pred | is_zero => simp[depth]; constructor; assumption
+  | ite t₁ t₂ t₃ IH₁ IH₂ IH₃ =>
+    simp[depth]
+    -- tricker proof but proceeds similarly
+    -- to the forward part of the proof of InT.eq_InS
+    constructor
+    · apply InSi.monotone (i := depth t₁)
+      · assumption
+      · apply Nat.le_max_left
+    · apply InSi.monotone (i := depth t₂)
+      · assumption
+      · apply Nat.le_trans (m := max (depth t₂) (depth t₃))
+        · apply Nat.le_max_left
+        · apply Nat.le_max_right
+    · apply InSi.monotone (i := depth t₃)
+      · assumption
+      · apply Nat.le_trans (m := max (depth t₂) (depth t₃))
+        · apply Nat.le_max_right
+        · apply Nat.le_max_right
+
+theorem InSi.depth_minimal (t : Term) (i : Nat) (H : InSi i t) : depth t ≤ i := by
+  induction H with
+  -- true, false, zero are members of S[1] by definition
+  -- their depths are 1
+  -- 1 ≤ 1, which makes these cases trivial
+  | true | false | zero => simp[depth]
+  | succ | pred | is_zero => simp[depth]; assumption
+  | ite H₁ H₂ H₃ IH₁ IH₂ IH₃ =>
+    simp[depth]
+    constructor
     · assumption
-    · apply Nat.le_trans
-      · apply Finset.card_union_le
-      apply Nat.add_le_add
+    · constructor <;> assumption
+
+/-
+Lemma 3.3.3
+
+∀ t, |Consts(t)| ≤ size(t)
+-/
+lemma Consts.le_size (t : Term) : (Const t).card ≤ size t := by
+  induction t <;> simp[Const, size]
+  case succ | pred | is_zero => apply Nat.le_succ_of_le; assumption
+  case ite t₁ t₂ t₃ IH₁ IH₂ IH₃ =>
+    apply Nat.le_succ_of_le
+    rw [Nat.add_assoc]
+    apply Nat.le_trans (m := (Const t₁).card + (Const t₂ ∪ Const t₃).card)
+    · apply Finset.card_union_le
+    · apply Nat.add_le_add
       · assumption
-      · assumption
+      · apply Nat.le_trans (m := (Const t₂).card + (Const t₃).card)
+        · apply Finset.card_union_le
+        · apply Nat.add_le_add <;> assumption
 
-end UArith
+end UntypedArith
 
-namespace UBool
+namespace BoolOperationalSemantics
 
+/-
+term t ::=
+      true
+      false
+      if t then t else t
+-/
 inductive Term where
-  | true : Term
-  | false : Term
-  | ite : Term → Term → Term → Term
-deriving DecidableEq, Repr
+  | true
+  | false
+  | ite : Term -> Term -> Term -> Term
+deriving Repr, DecidableEq
 
-inductive Value : Term → Prop where
+/-
+value v ::=
+      true
+      false
+-/
+inductive Value : Term -> Prop where
   | true : Value Term.true
   | false : Value Term.false
 
-/- Fig 3-1
-   Operational Semantics of Boolean Terms
+-- Define a dependent type for values
+structure ValueTerm where
+  term : Term
+  isValue : Value term
+
+/-
+Defining t -> t'
+
+─────────────────────────────(IfTrue)
+if true then t₂ else t₃ -> t₂
+
+──────────────────────────────(IfFalse)
+if false then t₂ else t₃ -> t₃
+
+                  t₁ -> t₁'
+───────────────────────────────────────────────(If)
+if t₁ then t₂ else t₃ -> if t₁' then t₂ else t₃
 -/
-inductive BStep : Term → Term → Prop
-  | EIfTrue {t1 t2} :
-      BStep (Term.ite Term.true t1 t2) t1
-  | EIfFalse {t1 t2} :
-      BStep (Term.ite Term.false t1 t2) t2
-  | EIf {t1 t1' t2 t3} :
-      BStep t1 t1' →
-      BStep (Term.ite t1 t2 t3) (Term.ite t1' t2 t3)
 
-instance : StepRel Term where
-  step := BStep
+inductive Step : Term -> Term -> Prop where
+  | IfTrue {t₂ t₃} : Step (Term.ite Term.true t₂ t₃) t₂
+  | IfFalse {t₂ t₃} : Step (Term.ite Term.false t₂ t₃) t₃
+  | If {t₁ t₁' t₂ t₃} (H : Step t₁ t₁') :
+    Step (Term.ite t₁ t₂ t₃) (Term.ite t₁' t₂ t₃)
 
-/- Theorem 3.5.4 [Determinancy of One-Step Evaluation] -/
-theorem step_is_deterministic {t t' t'' : Term} (H1 : t -> t') (H2 : t -> t'')
-  : t' = t'' := by
-  induction H1 generalizing t'' with
-  | EIfTrue =>
-    cases H2 with
-    | EIfTrue => rfl
-    | EIf Hs => cases Hs
-  | EIfFalse =>
-    cases H2 with
-    | EIfFalse => rfl
-    | EIf Hs => cases Hs
-  | EIf Hs IHs =>
-    cases H2 with
-    | EIfTrue => cases Hs
-    | EIfFalse => cases Hs
-    | EIf Hs' =>
-      have H := IHs Hs'
-      simp [H]
+-- Define notation for the step relation
+infix:50 " -b-> " => Step
 
-/- Definition 3.5.6 -/
+/-
+Definition 3.5.1
+
+An _instance_ of an inference rule is obtained by consistently
+replacing each metavariable by the same term in the rule's conclusion.
+and all its premises.
+
+Definition 3.5.2
+
+A rule is _satisfied_ by a relation if, for each instance of the rule,
+either the conclusion is in the relation or one of the premises is not.
+
+Definition 3.5.3
+The one-step evaluation relation → is the smallest binary relation
+on terms satisfying the three rules shown. When the pair (t, t′) is
+in the evaluation relation, we say that “the evaluation statement (or judgment)
+t → t′ is derivable.”
+-/
+
+/-
+Theorem 3.5.4
+
+The one-step evaluation relation is deterministic,
+i.e. if t → t′ and t → t′′, then t′ = t′′.
+
+This proof is tricky, so lets write it down in English first.
+
+We will prove this by induction on the first step t → t'.
+1. Case IfTrue:
+    This means t -> t' was derived from the rule IfTrue.
+    So t = if true then t₂ else t₃, and t' = t₂.
+    So we must prove that t'' = t₂.
+    We do this by case analysis on t → t''.
+    - If t → t'' was derived from IfTrue
+      and t = if true then t₂ else t₃,
+      then t'' = t₂.
+      Which means t' = t''.
+    - If t → t'' was derived from IfFalse,
+      then t = if false then t₂ else t₃.
+      But this is a contradiction,
+      because t = if true then t₂ else t₃.
+      By the principle of explosion,
+      we can conclude that t' = t''.
+    - If t → t'' was derived from If,
+      t = if t₁ then t₂ else t₃,
+      and t' = if t₁' then t₂ else t₃.
+      We know already that t = if true then t₂ else t₃,
+      so t₁ must be true.
+      Therefore true -> t₁' must be true.
+      But no such step exists,
+      so this case is impossible.
+2. Case IfFalse:
+    This case is similar to the IfTrue case.
+3. Case If:
+    If t -> t' was derived from If,
+    then there exists t₁ and t₁' such that
+    t₁ → t₁'.
+    The induction hypothesis states that
+    ∀ t₁'', t₁ → t₁'', then t₁' = t₁''.
+    We also know that t = if t₁ then t₂ else t₃,
+    and t' = if t₁' then t₂ else t₃.
+    We case analyze t → t''.
+    - If t → t'' was derived from IfTrue,
+      then t = if true then t₂ else t₃.
+      Which means t₁ = true.
+      Which means true -> t₁'.
+      But no such step exists,
+      so this case is impossible.
+    - If t → t'' was derived from IfFalse,
+      [Similar to IfTrue]
+    - If t → t'' was derived from If,
+      [I still don't know how to prove this manually]
+-/
+theorem Step.unique {t t' t'' : Term} (H₁ : t -b-> t') (H₂ : t -b-> t'') : t' = t'' := by
+  induction H₁ generalizing t'' with
+  | IfTrue => cases H₂ with
+    | IfTrue => rfl
+    -- lean discharges IfFalse
+    | If H_if => cases H_if
+  | IfFalse => cases H₂ with
+    | IfFalse => rfl
+    -- lean discharges IfTrue
+    | If H_if => cases H_if
+  | If H_if IH => cases H₂ with
+    | IfTrue | IfFalse => cases H_if
+    | If H_if' =>
+      apply IH at H_if'
+      subst H_if'
+      rfl
+
+/-
+Definition 3.5.6
+
+A term t is in normal form if no evaluation rule applies to it—
+i.e., if there is no t′ such that t → t′.
+-/
+
 def NormalForm (t : Term) : Prop :=
-  ¬ ∃ t', t -> t'
+  ¬ ∃ t', (t -b-> t')
 
-/- Theorem 3.5.7 Every value is normal form -/
-theorem values_are_normal_forms {t} (Hv : Value t) : NormalForm t := by
-  simp [NormalForm]
-  intro t'
-  intro H
-  induction Hv with
-  | true =>
-    cases H
-  | false =>
-    cases H
+/-
+Theorem 3.5.7
 
-/- 3.5.8 Theorem: If t is in normal form, then t is a value -/
-theorem normal_forms_are_values {t} (Hv : ¬ Value t) : ¬ NormalForm t := by
+Every value is in normal form.
+-/
+theorem Value.normal_form {v : Term} (H : Value v) : NormalForm v := by
+  simp only [NormalForm]
+  induction v with
+  | true | false => intro ⟨t, H⟩; cases H
+  | ite => cases H
+
+/-
+Theorem 3.5.8
+
+If t is not a value, then it is not in normal form.
+This is contrapositive way of saying if t is in normal form, then it is a value.
+-/
+theorem normal_forms_are_values {t} (H : ¬ Value t) : ¬ NormalForm t := by
   simp [NormalForm]
   induction t with
-  | true =>
+  | true | false =>
     exfalso
-    apply Hv
-    apply Value.true
-  | false =>
-    exfalso
-    apply Hv
-    apply Value.false
-  | ite t1 t2 t3 IH1 IH2 IH3 =>
-    by_cases HTrue : t1 = Term.true
-    · subst HTrue
-      exists t2
-      apply BStep.EIfTrue
-    by_cases HFalse : t1 = Term.false
-    · subst HFalse
-      exists t3
-      apply BStep.EIfFalse
-    have Hv' : ¬ Value t1 := by
-      intro Hv'
-      cases Hv' <;> contradiction
-    obtain ⟨t1', Hs⟩ := IH1 Hv'
-    exists t1'.ite t2 t3
-    apply BStep.EIf
-    assumption
+    apply H
+    constructor
+  | ite t₁ t₂ t₃ IH₁ IH₂ IH₃ =>
+    cases t₁ with
+    | true =>
+      exists t₂
+      constructor
+    | false =>
+      exists t₃
+      constructor
+    | ite t₁' t₂' t₃' =>
+      -- now we know that the condition is not a value
+      -- first we assert
+      have H₁_not_value : ¬Value (Term.ite t₁' t₂' t₃') := by
+        intro H_val
+        cases H_val -- ite cannot be true or false
+      -- Apply IH₁ to get a step for the condition
+      obtain ⟨t₁_next, H₁_step⟩ := IH₁ H₁_not_value
+      exists Term.ite t₁_next t₂ t₃
+      constructor
+      assumption
+
 
 inductive MultiStep : Term → Term → Prop
-| refl (x : Term) : MultiStep x x
-| step (x y z : Term) (h : BStep x y) (h' : MultiStep y z) : MultiStep x z
+  | refl (x : Term) : MultiStep x x
+  | step (x y z : Term) (h : Step x y) (h' : MultiStep y z) : MultiStep x z
 
-infixr:50 " ->* " => MultiStep
+infix:50 " ->∗ " => MultiStep
 
+/-
+Theorem 3.5.11
 
-lemma multi_step (x y : Term) (H: x -> y) : x ->* y := by
-  apply MultiStep.step (y := y)
-  · assumption
-  · apply MultiStep.refl
-
-lemma multi_trans (x y z: Term) (H1: x ->* y) (H2: y ->* z) : x ->* z := by
-  induction H1 with
-  | refl x => assumption
-  | step x' y' z' H H' IH =>
-    have IH := IH H2
-    apply MultiStep.step (y := y') <;> assumption
-
-/- 3.5.11 Theorem [Uniqueness of normal forms]: If t -→∗ u and t -→∗ u′, where u
-and u′ are both normal forms, then u = u′. -/
-theorem uniqueness_of_normal_forms {x y1 y2 : Term}
-  (H : x ->* y1)
-  (H' : x ->* y2)
-  (Hn : NormalForm y1)
-  (Hn' : NormalForm y2) :
-  y1 = y2 := by
-  revert y2 -- copied from software foundations kek
-  induction H with
+[Uniqueness of normal forms]: If t →∗ u and t →∗ u′, where u and u′
+are both normal forms, then u = u′.
+-/
+theorem MultiStep.unique_normal_forms {t u u'}
+  (H₁ : t ->∗ u) (H₂ : t ->∗ u')
+  (H₃ : NormalForm u) (H₄ : NormalForm u') :
+  u = u' := by
+  simp [NormalForm] at H₃ H₄
+  revert u'
+  induction H₁ with
   | refl x =>
-    intro y2 H Hnf
-    cases H with
+    intro u' H₂ H₄
+    cases H₂ with
     | refl => rfl
-    | step x' y' z' => -- contradiction here somehow
+    | step x y z H H' =>
       exfalso
-      apply Hn
-      exists y'
-  | step x' y' z' H H' IH =>
-    intro y2 Hs Hn'
-    cases Hs with
-    | refl => -- contradiction here too
-      exfalso
-      apply Hn'
-      exists y'
-    | step x'' y'' z'' =>
-      apply IH -- no clue what happened here, vibes
-      · assumption
-      · have Heq: y' = y'' := by
-          apply step_is_deterministic (t := x') <;> assumption
-        simp [Heq]
-        assumption
-      · assumption
-
-/- 3.5.12 Theorem [Termination of Evaluation]:
-  For every term t there is some normal form t′ such that t →∗ t′.  -/
--- might need some auxilary lemmas
-/- lemma multistep_congr_cond :
-    ∀ t1 t1' t2 t3,
-    t1 ->* t1' →
-    Term.ite t1 t2 t3 ->* Term.ite t1' t2 t3 := by
-  intro t1 t1' t2 t3 H
-  induction H with
-  | refl => apply MultiStep.refl
-  | step t t' t'' H H' IH =>
-    apply MultiStep.step (y := t'.ite t2 t3)
-    · apply BStep.EIf
+      apply H₃ y
       assumption
-    · assumption -/
+  | step x y z H H' IH =>
+    intro u' H₂ H₄
+    cases H₂ with
+    | refl =>
+      apply IH <;> try assumption
+      exfalso
+      apply H₄ y
+      assumption
+    | step x' y' z' G G' =>
+      -- have y_eq : y = y' := Step.unique H G
+      apply IH <;> try assumption
+      have y_eq : y = y' := Step.unique H G
+      subst y_eq
+      assumption
 
--- not sure how to prove this, or whether our semantics allow this
-theorem termination_of_evaluation :
-  ∀ t, ∃ t', t ->* t' ∧ NormalForm t' := by
-  intro t
+/-
+A bunch of lemmas to prove Theorem 3.5.12
+-/
+lemma MultiStep.IfTrue {t₂ t₃ t₂' : Term} (H : t₂ ->∗ t₂') :
+  Term.ite Term.true t₂ t₃ ->∗ t₂' := by
+  apply MultiStep.step
+  · constructor
+  · assumption
+
+lemma MultiStep.IfFalse {t₂ t₃ t₃' : Term} (H : t₃ ->∗ t₃') :
+  Term.ite Term.false t₂ t₃ ->∗ t₃' := by
+  apply MultiStep.step
+  · constructor
+  · assumption
+
+lemma MultiStep.If {t₁ t₁' t₂ t₃ : Term} (H : t₁ ->∗ t₁') :
+  Term.ite t₁ t₂ t₃ ->∗ Term.ite t₁' t₂ t₃ := by
+  induction H with
+  | refl t₁ =>
+    apply MultiStep.refl
+  | step t₁ t₂' t₁' H H' IH =>
+    apply MultiStep.step (y := t₂'.ite t₂ t₃)
+    case h => apply Step.If H
+    case h' => assumption
+
+lemma MultiStep.transitive {x y z : Term} (H₁ : MultiStep x y) (H₂ : MultiStep y z) :
+  MultiStep x z := by
+  induction H₁ with
+  | refl => assumption
+  | step x' y' z' H H' IH =>
+    apply MultiStep.step (y := y')
+    case h => assumption
+    case h' => apply IH; assumption
+
+/-
+Theorem 3.5.12
+
+For every term t there is some normal form t′ such that t →∗ t′.
+-/
+theorem MultiStep.normal_form (t : Term) :
+  ∃ u, NormalForm u ∧ t ->∗ u := by
+  simp [NormalForm]
   induction t with
-  -- true / false are trivially true because they are already
-  -- normal forms
   | true =>
     exists Term.true
     constructor
-    · apply MultiStep.refl
-    · simp [NormalForm]
-      intro x H
+    · intro x H
       cases H
+    · constructor
   | false =>
     exists Term.false
     constructor
-    · apply MultiStep.refl
-    · simp [NormalForm]
-      intro x H
+    · intro x H
       cases H
-  -- trickier case
-  | ite t1 t2 t3 IH1 IH2 IH3 => sorry
+    · constructor
+  | ite t₁ t₂ t₃ IH₁ IH₂ IH₃ =>
+    obtain ⟨u₁, IH₁_nf, IH₁_step⟩ := IH₁
+    obtain ⟨u₂, IH₂_nf, IH₂_step⟩ := IH₂
+    obtain ⟨u₃, IH₃_nf, IH₃_step⟩ := IH₃
+    cases u₁ with
+    | true =>
+      exists u₂
+      constructor
+      case left => assumption
+      case right =>
+        apply MultiStep.transitive (y := Term.ite Term.true t₂ t₃)
+        · exact MultiStep.If IH₁_step
+        · apply MultiStep.IfTrue
+          assumption
+    | false =>
+      exists u₃
+      constructor
+      case left => assumption
+      case right =>
+        apply MultiStep.transitive (y := Term.ite Term.false t₂ t₃)
+        · exact MultiStep.If IH₁_step
+        · apply MultiStep.IfFalse
+          assumption
+    | ite t₁' t₂' t₃' =>
+      exfalso
+      have H_u₁_is_not_value : ¬Value (Term.ite t₁' t₂' t₃') := by
+        intro H_val
+        cases H_val
+      have u₁_not_normal : ¬NormalForm (Term.ite t₁' t₂' t₃') :=
+        normal_forms_are_values H_u₁_is_not_value
+      simp [NormalForm] at u₁_not_normal
+      obtain ⟨t', u₁_not_normal⟩ := u₁_not_normal
+      apply IH₁_nf
+      apply u₁_not_normal
 
-end UBool
+/-
+Exercise 3.5.14
+
+This adapts this exercise to the boolean language.
+We just defined the small-step semantics for the boolean language,
+but we can also define the big-step semantics.
+-/
+inductive BigStep : Term -> Term -> Prop where
+  | ValueRefl (v: Term) (Hv : Value v) : BigStep v v
+  | IfTrue {t₁ t₂ t₃ v₂} (Hv : Value v₂) (Hp : BigStep t₁ Term.true)
+    (H : BigStep t₂ v₂) : BigStep (Term.ite Term.true t₂ t₃) v₂
+  | IfFalse {t₁ t₂ t₃ v₃} (Hv : Value v₃) (Hp : BigStep t₁ Term.false)
+    (H : BigStep t₃ v₃) : BigStep (Term.ite Term.false t₂ t₃) v₃
+
+infix :50 " ⇓ " => BigStep
+
+/-
+We can now show that the small-step and big-step semantics coincide.
+-/
+theorem BigStep.to_Step
+  {t v : Term} (H : Value v) : ((MultiStep t v) ↔ (BigStep t v)) := by
+  constructor
+  -- MultiStep -> BigStep
+  · intro H_small_step
+    induction H_small_step with
+    | refl => constructor; assumption
+    | step t₁ t₂ t₃ H_step H_next IH =>
+      cases H_step with
+      | IfTrue =>
+        constructor
+        · assumption
+        · constructor
+          constructor
+        apply IH
+        assumption
+      | IfFalse =>
+        constructor
+        · assumption
+        · constructor
+          constructor
+        apply IH
+        assumption
+      | If H_if => sorry
+  -- BigStep -> MultiStep
+  · intro H_big_step
+    induction H_big_step with
+    | ValueRefl v Hv => constructor
+    | IfTrue H₁ H₂ H₃ H₄ H₅ =>
+      apply H₅ at H
+      apply MultiStep.IfTrue
+      assumption
+    | IfFalse H₁ H₂ H₃ H₄ H₅ =>
+      apply H₅ at H
+      apply MultiStep.IfFalse
+      assumption
+
+
+
+
+end BoolOperationalSemantics
